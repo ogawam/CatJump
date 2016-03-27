@@ -37,7 +37,7 @@ public class EnemyFloat : EnemyBase {
 		}
 	}
 
-	public override Result CheckHit (Vector3 vec)
+	public override Result CheckHit (Vector3 vec, bool isRolling)
 	{
 		Result result = Result.Damage;
 		if (Mathf.Abs (vec.y) > Mathf.Abs (vec.x)) {

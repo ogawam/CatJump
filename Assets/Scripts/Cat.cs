@@ -8,20 +8,29 @@ public class Cat : MonoBehaviour {
 	[SerializeField] SpriteRenderer _renderer;
 	[SerializeField] SpriteRenderer _arrowRenderer;
 	[SerializeField] BoxCollider2D _bodyCollider;
+	[SerializeField] GameObject _prefabSlashEffect;
 
 	[SerializeField] GameInput[] _inputs;
 
 	[SerializeField] float _movePower;
 	[SerializeField] float _jumpPower;
 	[SerializeField] float _fallPower;
+	[SerializeField] float _rollingPower;
 	[SerializeField] float _groundLine;
 	[SerializeField] float _maxChargeSec;
+
+	[SerializeField] float _maxRollingSec;
+	float _rollingSec;
+
+	Collider2D _landingObject = null;
+	Vector2 _landingPosition = Vector2.zero;
 
 	class Flag {
 		static public readonly int InAir	= (1 << 0);
 		static public readonly int Aerial	= (1 << 1);
 		static public readonly int Dead		= (1 << 2);
 		static public readonly int KillMode	= (1 << 3);
+		static public readonly int Rolling	= (1 << 4);
 	}
 
 	int _flag;
@@ -32,13 +41,13 @@ public class Cat : MonoBehaviour {
 		MoveR
 	}
 
-	enum InputType {
-		Left = (1<<0),
-		Right = (1<<1),
-		Jump = (1<<2)
+	class InputType {
+		static public readonly int Left = (1 << 0);
+		static public readonly int Right = (1 << 1);
+		static public readonly int Jump = (1 << 2);
 	}
 
-	InputType _input = 0;
+	int _inputType = 0;
 	float _inputRate = 0;
 	float _chargeSec = 0;
 
@@ -88,95 +97,147 @@ public class Cat : MonoBehaviour {
 			else if (_chargeSec < _maxChargeSec * 0.75f)
 				_renderer.sprite = _sprites [3];
 			else {
-				if (Utility.IsBit (_flag, Flag.KillMode))
+				if (IsReadyToRolling)
 					_renderer.sprite = _sprites [4];
 				_renderer.transform.localPosition = Vector3.left * 3 * Mathf.Sin (Time.time * 20 * Mathf.PI);
 			}
 		}
 
+		if(!Utility.Is(_flag, Flag.Rolling))
+			_speed.y -= _fallPower * Time.deltaTime;
+
 		Vector2 pos = transform.localPosition;
-		Vector3 scale = _renderer.transform.localScale;
-		float move = 0;
-		if( (_input & InputType.Jump) != 0) {
-			_chargeSec = Mathf.Min (_chargeSec + Time.deltaTime, _maxChargeSec);
-		}
-		else {
-			if ((_input & InputType.Left) != 0) {
-				move -= _movePower;
-				scale.x = -Mathf.Abs(scale.x);
-
-			} else if ((_input & InputType.Right) != 0) {
-				move += _movePower;
-				scale.x = Mathf.Abs(scale.x);
-			}
-		}
-		_speed.x += (move - _speed.x) * Mathf.Min(1, 2 * Time.deltaTime);
-		_renderer.transform.localScale = scale;
-
-		_speed.y -= _fallPower * Time.deltaTime;
 		Vector2 vec = _speed * Time.deltaTime;
+		if (_landingObject != null) {
+			Vector2 nextPos = _landingObject.transform.localPosition;
+			pos += nextPos - _landingPosition;
+			_landingPosition = nextPos;
+		}
 		pos += vec;
 		if (pos.x < -Define.fieldWidth / 2)
 			pos.x += Define.fieldWidth;
 		else if(pos.x > Define.fieldWidth / 2)
 			pos.x -= Define.fieldWidth;
 
-		_arrowRenderer.transform.localScale = Vector3.one * _inputRate;
+		if (Utility.Is (_flag, Flag.Dead)) {
+			_renderer.sprite = _sprites [5];
+			_renderer.transform.localEulerAngles = Vector3.forward * 180f;
+			_arrowRenderer.transform.localScale = Vector3.zero;
+		}
+		else {
 
-		if (Utility.IsBit (_flag, Flag.InAir | Flag.KillMode))
-			_renderer.transform.localEulerAngles = Vector3.back * 360 * 10 * Time.time;
-		else
-			_renderer.transform.localEulerAngles = Vector3.zero;
+			if (Utility.Is (_flag, Flag.Rolling)) {
+				_arrowRenderer.transform.localScale = Vector3.zero;
+				_renderer.transform.localEulerAngles = Vector3.back * 360 * 10 * Time.time;
+				_rollingSec += Time.deltaTime;
+				if (_rollingSec > _maxRollingSec) {
+					_renderer.sprite = _sprites[5];
+					_renderer.transform.localEulerAngles = Vector3.zero;
+					Utility.Off (ref _flag, Flag.Rolling);
+				}				
+			} else {
+				if (IsReadyToRolling) {
+					_arrowRenderer.transform.localScale = Vector3.one;
+					_arrowRenderer.transform.localEulerAngles = Vector3.forward * (90 - 45 * _inputRate);
+				} else {
+					_arrowRenderer.transform.localScale = Vector3.one * _inputRate;
+					_arrowRenderer.transform.localEulerAngles = Vector3.zero;
+				}
+				Vector3 scale = _renderer.transform.localScale;
+				float move = 0;
+				if (Utility.Is (_inputType, InputType.Jump)) {
+					_chargeSec = Mathf.Min (_chargeSec + Time.deltaTime, _maxChargeSec);
+				} else {
+					if (Utility.Is (_inputType, InputType.Left)) {
+						move -= _movePower;
+						scale.x = -Mathf.Abs (scale.x);
 
-		if (!Utility.IsBit(_flag, Flag.Dead)) {
-			if (pos.y < _groundLine) {
+					} else if (Utility.Is (_inputType, InputType.Right)) {
+						move += _movePower;
+						scale.x = Mathf.Abs (scale.x);
+					}
+				}
+				_speed.x += (move - _speed.x) * Mathf.Min (1, 2 * Time.deltaTime);
+				_renderer.transform.localScale = scale;
+				_renderer.transform.localEulerAngles = Vector3.zero;
+			}
+
+			if (pos.y <= _groundLine) {
 				pos.y = _groundLine;
 				_speed.y = 0;
-				if (Utility.IsBit(_flag, Flag.InAir)) {
-					_flag = Utility.OffBit(_flag, Flag.InAir);
+				if (Utility.Is(_flag, Flag.InAir)) {
+					Utility.Off(ref _flag, Flag.InAir);
 					_renderer.sprite = _sprites [0];
 				}
 			}
 
-			Vector2 bodyColliPos = pos + _bodyCollider.offset;
-			Vector2 bodyColliSize = _bodyCollider.size;
-
-			GameUnitWorld.Result result = GameUnitWorld.Get ().CheckPlayer (bodyColliPos, bodyColliSize, vec);
+			GameUnitWorld.Result result = GameUnitWorld.Get ().CheckBox (pos, vec, _bodyCollider, Utility.Is (_flag, Flag.Rolling));
+			GameObject effect = null;
 			switch (result.enemyResult) {
 			case EnemyBase.Result.Defeat:
-				_speed.y = Mathf.Max(_speed.y, 0);
-				_flag = Utility.OnBit (_flag, Flag.Aerial);
+				effect = Instantiate (_prefabSlashEffect, result.hitPos, Quaternion.identity) as GameObject;
+				if (!Utility.Is (_flag, Flag.Rolling)) {
+					if (_speed.y < 0)
+						_speed.y = -Speed.y;
+					Utility.On (ref _flag, Flag.Aerial);
+				}
+				break;
+			case EnemyBase.Result.Regist:
+				effect = Instantiate (_prefabSlashEffect, result.hitPos, Quaternion.identity) as GameObject;
+				if (!Utility.Is (_flag, Flag.Rolling)) {
+					if (_speed.y < 0)
+						_speed.y = Mathf.Max(320f, -Speed.y * 0.5f);
+					else _speed.y = 0;
+				}
 				break;
 			case EnemyBase.Result.Damage:
 				_speed = Vector3.up * 10;
-				_renderer.sprite = _sprites[5];
+				_renderer.sprite = _sprites [5];
 				_renderer.transform.localEulerAngles = Vector3.forward * 180f;
-				_flag = Utility.OnBit (_flag, Flag.Dead);
-				_input = 0;
+				Utility.On (ref _flag, Flag.Dead);
+				_inputType = 0;
 				break;
 			}
 
-			if (result.hitNum > 0) {
+			if (effect != null) {
+				effect.transform.SetParent (GameUnitWorld.Get().transform, false);
+			}
+
+			if (result.isHit) {
 				//			Debug.Log ("hit " + result.hitNum + " vec " + result.hitVec);
-				pos = result.setPos - _bodyCollider.offset;
-				if (result.hitVec.y > 0) {
-					_speed.y = 0;
-					if (Utility.IsBit (_flag, Flag.InAir)) {
-						_flag = Utility.OffBit (_flag, Flag.InAir);
-						_renderer.sprite = _sprites [0];
+				pos = result.setPos;
+				if(Utility.Is(_flag, Flag.Rolling)) {
+					float angle = Mathf.Atan2 (result.hitVec.x, result.hitVec.y) * Mathf.Rad2Deg;
+					Quaternion rotation = Quaternion.Euler (0, 0, angle);
+					_speed = rotation * _speed;
+					_speed.y = -Speed.y;
+					_speed = Quaternion.Inverse (rotation) * _speed;
+					Debug.Log ("angle "+ angle);
+				}
+				else if(result.enemyResult == EnemyBase.Result.None) {
+					if (result.hitVec.y > 0) {
+						_speed.y = 0;
+						if (Utility.Is (_flag, Flag.InAir)) {
+							Utility.Off (ref _flag, Flag.InAir);
+							_renderer.sprite = _sprites [0];
+							_landingObject = result.landingObject;
+							_landingPosition = _landingObject.transform.localPosition;
+							Debug.Log ("Landing");
+						}
+					} else if (result.hitVec.y <= -0.5f) {
+						_speed.y = 0;
 					}
-				} else if (result.hitVec.y <= -0.5f) {
-					_speed.y = 0;
 				}
 			} else if (_speed.y < 0) {
-				_flag = Utility.OnBit (_flag, Flag.InAir);
+				Utility.On (ref _flag, Flag.InAir);
+				_landingObject = null;
 			}
 		}
 		transform.localPosition = pos;
 	}
 
 	void OnMoveDown(PointerEventData eventData) {
-		if (Utility.IsBit (_flag, Flag.Dead))
+		if (Utility.Is (_flag, Flag.Dead))
 			return;
 		
 		float quater = Screen.width * 0.125f;
@@ -184,50 +245,63 @@ public class Cat : MonoBehaviour {
 
 		if (_inputRate > 0)
 			_inputRate += 0.25f;
-		else _inputRate -= 0.25f;
-		_inputRate = Mathf.Clamp(_inputRate, -1, 1);
+		else
+			_inputRate -= 0.25f;
+		_inputRate = Mathf.Clamp (_inputRate, -1, 1);
 
-		_input &= ~(InputType.Right | InputType.Left);
+		Utility.Off(ref _inputType, InputType.Right | InputType.Left);
 		if(eventData.position.x > quater)
-			_input |= InputType.Right;
-		else _input |= InputType.Left;
+			Utility.On(ref _inputType, InputType.Right);
+		else Utility.On(ref _inputType, InputType.Left);
 	}
 
 	void OnMoveUp(PointerEventData eventData) {
-		if (Utility.IsBit (_flag, Flag.Dead))
+		if (Utility.Is (_flag, Flag.Dead))
 			return;
 		
 		_inputRate = 0;
-		_input &= ~(InputType.Right | InputType.Left);
+		Utility.Off(ref _inputType, InputType.Right | InputType.Left);
 	}
 
 	void OnJumpDown(PointerEventData eventData) {
-		if (Utility.IsBit (_flag, Flag.Dead))
+		if (Utility.Is (_flag, Flag.Dead))
 			return;
-		
-		_input |= InputType.Jump;
+
+		if (Utility.Is (_flag, Flag.Rolling))
+			Utility.Off (ref _flag, Flag.Rolling);
+		_inputType |= InputType.Jump;
 	}
 
 	void OnJumpUp(PointerEventData eventData) {
-		if (Utility.IsBit (_flag, Flag.Dead))
+		if (Utility.Is (_flag, Flag.Dead))
 			return;
 		
-		_input &= ~InputType.Jump;
-		if (Utility.IsBit(_flag, Flag.InAir) 
-		&& !Utility.IsBit(_flag, Flag.Aerial)) {
+		_inputType &= ~InputType.Jump;
+		if (Utility.Is(_flag, Flag.InAir) 
+		&& !Utility.Is(_flag, Flag.Aerial)) {
 			_chargeSec = 0;
 			return;
 		}
 
-		if(Utility.IsBit(_flag, Flag.KillMode))
+		if (IsReadyToRolling) {
+			Utility.On (ref _flag, Flag.Rolling);
+			_rollingSec = 0;
 			_renderer.sprite = _sprites [6];
-		else _renderer.sprite = _sprites [5];
-		_speed.y = _jumpPower * (_chargeSec / _maxChargeSec);
+			_speed.y = _rollingPower;
+			_speed = Quaternion.Euler(0,0,-45 * _inputRate) * _speed;
+		} else {
+			_renderer.sprite = _sprites [5];
+			_speed.y = _jumpPower * (_chargeSec / _maxChargeSec);
+		}
 		_chargeSec = 0;
-		_flag = Utility.OffBit (Utility.OnBit (_flag, Flag.InAir), Flag.Aerial);
+		_landingObject = null;
+		Utility.On (ref _flag, Flag.InAir);
+		Utility.Off (ref _flag, Flag.Aerial);
 	}
 
 	public void OnKillMode() {
-		_flag = Utility.OnBit(_flag, Flag.KillMode);
+		Utility.On(ref _flag, Flag.KillMode);
 	}
+
+	bool IsReadyToRolling { get { return Utility.Is (_flag, Flag.KillMode) && _chargeSec >= _maxChargeSec; } }
 }

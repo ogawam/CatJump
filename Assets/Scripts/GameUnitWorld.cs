@@ -5,6 +5,7 @@ using System.Collections.Generic;
 public class GameUnitWorld : Singleton<GameUnitWorld> {
 
 	BoxCollider2D[] _boxColliders;
+	[SerializeField] float _scaffoldThickness;
 
 	void Awake() {
 		instance = this;
@@ -19,10 +20,11 @@ public class GameUnitWorld : Singleton<GameUnitWorld> {
 	}
 
 	public class Result {
-		public int hitNum = 0;
+		public bool isHit = false;
 		public Vector2 setPos; 
 		public Vector2 hitPos;
 		public Vector2 hitVec;
+		public Collider2D landingObject = null;
 		public EnemyBase.Result enemyResult = EnemyBase.Result.None;
 	}
 
@@ -32,14 +34,20 @@ public class GameUnitWorld : Singleton<GameUnitWorld> {
 		return result;
 	}
 
-	public Result CheckPlayer(Vector2 checkPos, Vector2 checkSize, Vector2 checkVec) {
+	public Result CheckBox(Vector2 checkPos, Vector2 checkVec, BoxCollider2D checkBox, bool isRolling) {
 		Result result = new Result();
 		Vector2 resultPos = Vector2.zero;
+		int xHitNum = 0;
+		int yHitNum = 0;
+
+		checkPos += checkBox.offset;
+		Vector2 checkSize = checkBox.size;
+
 		foreach(BoxCollider2D boxCollider in _boxColliders) {
 			if (boxCollider == null || !boxCollider.enabled)
 				continue; 
 			
-			if (boxCollider.tag == "Player")
+			if (checkBox.tag == boxCollider.tag || boxCollider.tag == "Player")
 				continue;
 
 			Vector2 pos = boxCollider.transform.localPosition;
@@ -49,8 +57,9 @@ public class GameUnitWorld : Singleton<GameUnitWorld> {
 
 			// 足場の場合
 			if (boxCollider.tag == "Scaffold") {
-				if (checkVec.y > 0 || (vec.y + checkVec.y) > -size.y / 2)
+				if (checkVec.y > 0 || (vec.y + checkVec.y) > -(size.y / 2 - _scaffoldThickness)) {
 					continue;
+				}
 			}
 
 			for (int loop = 0; loop < 2; ++loop) {
@@ -60,7 +69,8 @@ public class GameUnitWorld : Singleton<GameUnitWorld> {
 					if (boxCollider.tag == "Enemy") {
 						EnemyBase enemy = boxCollider.GetComponentInParent<EnemyBase> ();
 						if (enemy != null) {
-							EnemyBase.Result enemyResult = enemy.CheckHit (vec);
+							result.hitPos = pos;
+							EnemyBase.Result enemyResult = enemy.CheckHit (vec, isRolling);
 							if (enemyResult > result.enemyResult) {
 								result.enemyResult = enemyResult;
 							}
@@ -70,21 +80,22 @@ public class GameUnitWorld : Singleton<GameUnitWorld> {
 					}
 
 					//				Debug.Log ("vec "+ vec+ " size "+ size+ " checkVec "+ checkVec);
-					if (Mathf.Abs (vec.y) > Mathf.Abs (vec.x) || boxCollider.isTrigger) {
-						if (vec.y > 0)
-							pos.y -= size.y / 2 + 0.05f;
-						else
-							pos.y += size.y / 2 + 0.05f;
-						pos.x = checkPos.x;
+					if (Mathf.Abs (vec.y) > Mathf.Abs (vec.x) || boxCollider.tag == "Scaffold") {
+						if (vec.y > 0) {
+							resultPos.y += pos.y - size.y / 2;
+						} else {
+							result.landingObject = boxCollider;
+							resultPos.y += pos.y + size.y / 2;
+						}
+						yHitNum++;
 					} else {
 						if (vec.x > 0)
-							pos.x -= size.x / 2 + 0.05f;
+							resultPos.x += pos.x - size.x / 2;
 						else
-							pos.x += size.x / 2 + 0.05f;
-						pos.y = checkPos.y;
+							resultPos.x += pos.x + size.x / 2;
+						xHitNum++;
 					}
-					resultPos += pos;
-					result.hitNum++;
+					result.isHit = true;
 					break;
 				}
 				if (pos.x - size.x / 2 < -Define.fieldWidth / 2)
@@ -96,11 +107,11 @@ public class GameUnitWorld : Singleton<GameUnitWorld> {
 				vec = pos - checkPos;
 			}
 		}
-		if (result.hitNum > 0) {
-			result.setPos = resultPos / result.hitNum;
-			result.hitVec = (result.setPos - checkPos).normalized;
-		}
-
+		result.setPos = checkPos;
+		if (xHitNum > 0) result.setPos.x = resultPos.x / xHitNum;
+		if (yHitNum > 0) result.setPos.y = resultPos.y / yHitNum;
+		result.hitVec = (result.setPos - checkPos).normalized;
+		result.setPos -= checkBox.offset;
 		return result;
 	}
 }

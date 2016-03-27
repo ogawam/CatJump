@@ -3,15 +3,15 @@ using System.Collections;
 
 static public class Utility {
 
-	static public bool IsBit (int flag, int bit) {
+	static public bool Is (int flag, int bit) {
 		return (flag & bit) == bit;
 	}
 
-	static public int OnBit(int flag, int bit) {
-		return flag | bit;
+	static public void On(ref int flag, int bit) {
+		flag |= bit;
 	}
 
-	static public int OffBit(int flag, int bit) {
-		return flag & ~bit;
+	static public void Off(ref int flag, int bit) {
+		flag &= ~bit;
 	}
 }
